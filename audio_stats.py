@@ -60,7 +60,7 @@ def collect_audio_data(folder_path):
                 # Log information for each audio file in one line
                 logging.info(f"File: {file_name} | Time: {recording_time} | Duration: {duration:.2f} seconds")
                 # Add the duration to the corresponding date
-                audio_data[recording_time].append(duration)
+                audio_data[recording_time.date()].append(duration)
 
     logging.info("Finished collecting audio data.")
     return audio_data
@@ -72,16 +72,17 @@ def create_monthly_plots(audio_data):
     logging.info("Starting to create monthly plots...")
 
     # Organize the data by year-month -> day
-    for timestamp, durations in audio_data.items():
-        year_month = timestamp.strftime('%Y-%m')
-        day = timestamp.day
+    for date, durations in audio_data.items():
+        year_month = date.strftime('%Y-%m')
+        day = date.day
         monthly_data[year_month][day].extend(durations)
 
     # Determine the global y-axis scale (maximum duration in minutes)
     max_duration_seconds = max(
-        sum(durations) for daily_durations in monthly_data.values() for durations in daily_durations.values()
+        (sum(durations) for daily_durations in monthly_data.values() for durations in daily_durations.values()), 
+        default=0
     )
-    max_duration_minutes = max_duration_seconds / 60
+    max_duration_minutes = max_duration_seconds / 60 if max_duration_seconds > 0 else 1  # Avoid zero y-axis scaling
 
     # Define colors for multiple segments in bars
     colors = plt.cm.get_cmap('tab20', 20)  # Colormap to use different colors for up to 20 segments
@@ -98,10 +99,12 @@ def create_monthly_plots(audio_data):
         plt.figure(figsize=(10, 6))
         bottom = [0] * days_in_month  # To stack the segments on top of each other
 
-        for idx, durations in enumerate(zip(*all_durations)):  # Transpose to process each "layer" of stacked bars
-            durations_in_minutes = [dur / 60 if dur else 0 for dur in durations]  # Convert to minutes
-            plt.bar(days, durations_in_minutes, bottom=bottom, color=colors(idx), label=f'Audio {idx + 1}')
-            bottom = [b + d for b, d in zip(bottom, durations_in_minutes)]
+        for i in range(max(len(durations) for durations in all_durations)):  # Number of stacked segments
+            segment_durations = [
+                (durations[i] / 60 if i < len(durations) else 0) for durations in all_durations
+            ]  # Convert to minutes, handle missing segments
+            plt.bar(days, segment_durations, bottom=bottom, color=colors(i), label=f'Audio {i + 1}')
+            bottom = [b + d for b, d in zip(bottom, segment_durations)]
 
         # Ensure all plots have the same y-axis scale
         plt.ylim(0, max_duration_minutes)
@@ -114,7 +117,7 @@ def create_monthly_plots(audio_data):
 
         # Add a legend for the segments if there are multiple audios on a day
         if any(len(durations) > 1 for durations in all_durations):
-            legend_elements = [Patch(facecolor=colors(i), label=f'Audio {i+1}') for i in range(len(all_durations[0]))]
+            legend_elements = [Patch(facecolor=colors(i), label=f'Audio {i+1}') for i in range(max(len(d) for d in all_durations))]
             plt.legend(handles=legend_elements, title="Segments")
 
         # Save the plot for this month
