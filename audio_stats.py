@@ -4,22 +4,31 @@ import logging
 from datetime import datetime
 from collections import defaultdict
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from pydub import AudioSegment
+from pydub.exceptions import CouldntDecodeError
+import calendar
 
-# Configure logging
+# Configure logging without timestamps
 logging.basicConfig(
     level=logging.INFO, 
-    format='%(levelname)s - %(message)s', 
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format='%(levelname)s - %(message)s'
 )
 
 # Regular expression to match filenames of the format YYYY-MM-DD hh.mm.ss
 filename_pattern = re.compile(r'(\d{4})-(\d{2})-(\d{2}) (\d{2})\.(\d{2})\.(\d{2})')
 
 def get_audio_duration(file_path):
-    """Returns the duration of the audio file in seconds."""
-    audio = AudioSegment.from_file(file_path)
-    return len(audio) / 1000  # Convert milliseconds to seconds
+    """Returns the duration of the audio file in seconds, or None if there's an error."""
+    try:
+        audio = AudioSegment.from_file(file_path)
+        return len(audio) / 1000  # Convert milliseconds to seconds
+    except CouldntDecodeError:
+        logging.error(f"Could not decode audio file: {file_path}")
+        return None
+    except Exception as e:
+        logging.error(f"Error reading audio file: {file_path} | Error: {e}")
+        return None
 
 def parse_filename(file_name):
     """Extract the datetime from the filename based on the pattern."""
@@ -45,18 +54,13 @@ def collect_audio_data(folder_path):
                 logging.warning(f"Could not parse recording time from filename: {file_name}")
                 continue
 
-            try:
-                # Get the duration of the audio file
-                duration = get_audio_duration(file_path)
-
+            # Get the duration of the audio file
+            duration = get_audio_duration(file_path)
+            if duration is not None:
                 # Log information for each audio file in one line
                 logging.info(f"File: {file_name} | Time: {recording_time} | Duration: {duration:.2f} seconds")
-                
                 # Add the duration to the corresponding date
                 audio_data[recording_time].append(duration)
-
-            except Exception as e:
-                logging.error(f"Error processing file: {file_name} | Error: {e}")
 
     logging.info("Finished collecting audio data.")
     return audio_data
@@ -73,23 +77,45 @@ def create_monthly_plots(audio_data):
         day = timestamp.day
         monthly_data[year_month][day].extend(durations)
 
+    # Determine the global y-axis scale (maximum duration in minutes)
+    max_duration_seconds = max(
+        sum(durations) for daily_durations in monthly_data.values() for durations in daily_durations.values()
+    )
+    max_duration_minutes = max_duration_seconds / 60
+
+    # Define colors for multiple segments in bars
+    colors = plt.cm.get_cmap('tab20', 20)  # Colormap to use different colors for up to 20 segments
+
     # Plot each month's data
     for year_month, daily_durations in sorted(monthly_data.items()):
-        days = sorted(daily_durations.keys())
-        max_day = max(days)  # Determine the number of days in the month
-        day_durations = [sum(daily_durations[day]) for day in days]  # Sum durations for each day
+        days_in_month = calendar.monthrange(int(year_month[:4]), int(year_month[5:]))[1]
+        days = list(range(1, days_in_month + 1))  # Ensure all days of the month are included
+        all_durations = [daily_durations.get(day, []) for day in days]  # Fill missing days with empty lists
 
         logging.info(f"Creating plot for {year_month} with data for {len(days)} days.")
 
-        # Plot the beam diagram
+        # Plot the beam diagram with segmented bars
         plt.figure(figsize=(10, 6))
-        plt.bar(days, day_durations, color='blue')
+        bottom = [0] * days_in_month  # To stack the segments on top of each other
+
+        for idx, durations in enumerate(zip(*all_durations)):  # Transpose to process each "layer" of stacked bars
+            durations_in_minutes = [dur / 60 if dur else 0 for dur in durations]  # Convert to minutes
+            plt.bar(days, durations_in_minutes, bottom=bottom, color=colors(idx), label=f'Audio {idx + 1}')
+            bottom = [b + d for b, d in zip(bottom, durations_in_minutes)]
+
+        # Ensure all plots have the same y-axis scale
+        plt.ylim(0, max_duration_minutes)
+
         plt.title(f'Audio Recording Time for {year_month}')
         plt.xlabel('Day of the Month')
-        plt.ylabel('Total Recording Time (seconds)')
-        plt.ylim(0, max(max(day_durations), 1))  # Ensure all plots have the same y-axis scale
-        plt.xticks(range(1, max_day + 1))
+        plt.ylabel('Total Recording Time (minutes)')
+        plt.xticks(range(1, days_in_month + 1))  # Ensure all days of the month are visible
         plt.grid(True)
+
+        # Add a legend for the segments if there are multiple audios on a day
+        if any(len(durations) > 1 for durations in all_durations):
+            legend_elements = [Patch(facecolor=colors(i), label=f'Audio {i+1}') for i in range(len(all_durations[0]))]
+            plt.legend(handles=legend_elements, title="Segments")
 
         # Save the plot for this month
         plot_filename = f'audio_recording_{year_month}.png'
