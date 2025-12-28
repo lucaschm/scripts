@@ -28,7 +28,7 @@ def is_transcribed(folder_path, audio_file):
 def transcribe_audio(audio_file, output_dir):
     print(f"Transcribing {audio_file}...")
     # the whisper command you use to transcribe
-    os.system(f"whisper \"{audio_file}\" --model medium --output_dir {output_dir}")
+    os.system(f"whisper \"{audio_file}\" --model turbo --output_dir {output_dir}")
     # Print message
     print(f"{audio_file} transcribed")
 
