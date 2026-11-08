@@ -16,7 +16,18 @@ from zoneinfo import ZoneInfo
 
 TZ_NAME = "Europe/Berlin"
 TZ = ZoneInfo(TZ_NAME)
-DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
+# Unterstuetzte Datumsformate; ohne Uhrzeit wird 00:00:00 verwendet
+DATE_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y")
+
+
+def parse_date(text: str) -> datetime:
+    text = text.strip()
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=TZ)
+        except ValueError:
+            continue
+    raise ValueError(f"Datum '{text}' passt zu keinem der Formate {DATE_FORMATS}")
 
 
 def parse_amount(text: str) -> float:
@@ -46,7 +57,7 @@ def read_csv(path: str) -> list:
             if not any((v or "").strip() for v in row.values()):
                 continue  # Leerzeile
             try:
-                dt = datetime.strptime(row["Datum"].strip(), DATE_FORMAT).replace(tzinfo=TZ)
+                dt = parse_date(row["Datum"])
                 amount = parse_amount(row["EUR"])
                 kind = row["Einnahmen/Ausgaben"].strip()
                 if kind == "Ausgabe":
